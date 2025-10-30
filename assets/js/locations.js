@@ -1,6 +1,13 @@
 jQuery(function($){
     $('.report-section').hide();
 
+    // Debug: Check if ajaxurl is defined
+    if (typeof ajaxurl === 'undefined') {
+        console.error('ajaxurl is not defined!');
+    } else {
+        console.log('ajaxurl is defined:', ajaxurl);
+    }
+
     function setupBinEditing($container){
         $container.find('td.blm-bin-editable').off('click').on('click', function(){
             var $td = $(this);
@@ -48,10 +55,18 @@ jQuery(function($){
     }
 
     function setupAddProduct($container){
-        $container.find('.blm-add-product').off('click').on('click', function(){
+        var buttons = $container.find('.blm-add-product');
+        console.log('setupAddProduct called, found', buttons.length, 'buttons in container:', $container);
+
+        // Use event delegation to handle dynamically added buttons
+        $container.off('click', '.blm-add-product').on('click', '.blm-add-product', function(e){
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Add Product button clicked!');
             var $btn = $(this);
             var bin  = $btn.data('bin');
             var $row = $btn.closest('tr');
+            console.log('Bin:', bin, 'Button:', $btn);
 
             if(bin){
                 var $input = $('<input type="text" class="blm-add-input" placeholder="Enter SKU or Barcode" />');
@@ -362,6 +377,197 @@ jQuery(function($){
     }
 
     jQuery(document).ready(function($) {
+        console.log('Document ready, initializing...');
+
+        // Global event delegation for Add Product buttons
+        $(document).on('click', '.blm-add-product', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Global click handler triggered for .blm-add-product');
+
+            var $btn = $(this);
+            var bin  = $btn.data('bin');
+            var $row = $btn.closest('tr');
+            console.log('Bin:', bin, 'Button:', $btn);
+
+            if(bin){
+                console.log('Bin exists, creating input field...');
+                var $input = $('<input type="text" class="blm-add-input" placeholder="Enter SKU or Barcode" />');
+                $btn.replaceWith($input);
+                $input.focus();
+
+                function cancel(){
+                    $input.replaceWith($('<button type="button" class="blm-add-product bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 text-xs font-medium transition" data-bin="'+bin+'">Add Product</button>'));
+                }
+
+                function save(){
+                    var identifier = $input.val().trim();
+                    console.log('Saving with identifier:', identifier);
+                    if(!identifier){
+                        cancel();
+                        return;
+                    }
+                    $.post(ajaxurl, { action: 'blm_add_product_to_bin', bin: bin, identifier: identifier }, function(resp){
+                        console.log('AJAX response:', resp);
+                        if(resp && resp.success){
+                            var p = resp.data;
+                            var hasQty = $row.closest('table').find('th').filter(function(){
+                                return $(this).text().trim() === 'Quantity';
+                            }).length > 0;
+                            var $newRow = $(`
+                                <tr data-product-id="${p.ID}" class="hover:bg-gray-50 transition border-b border-gray-200">
+                                    <td class="p-3 text-center w-10">
+                                        <input type="checkbox" class="blm-select-row" data-product-id="${p.ID}">
+                                    </td>
+                                    <td class="p-3 font-medium text-gray-800 blm-bin-editable" data-product-id="${p.ID}">
+                                        ${p.bin || ''}
+                                    </td>
+                                    <td class="p-3 text-gray-700">${p.sku || ''}</td>
+                                    <td class="p-3 text-gray-700">${p.barcode || ''}</td>
+                                    <td class="p-3 w-2/5 truncate text-gray-800">${p.name || ''}</td>
+                                    ${hasQty ? '<td class="p-3 text-center"></td>' : ''}
+                                    <td class="p-3 w-32">
+                                        <button type="button"
+                                            class="blm-add-product bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 text-xs font-medium transition"
+                                            data-bin="${p.bin}">
+                                            Add Product
+                                        </button>
+                                    </td>
+                                    <td class="p-3 w-10 text-center">
+                                        <button type="button"
+                                            class="blm-remove-product bg-red-500 text-white w-7 h-7 rounded-md flex items-center justify-center hover:bg-red-600 transition text-sm font-semibold"
+                                            data-product-id="${p.ID}">
+                                            ×
+                                        </button>
+                                    </td>
+                                </tr>
+                                `);
+
+                            if($row.hasClass('blm-add-row')){
+                                $row.before($newRow);
+                                cancel();
+                            } else if($row.hasClass('blm-no-products')) {
+                                $row.replaceWith($newRow);
+                            } else {
+                                $row.after($newRow);
+                                $input.closest('td').empty();
+                            }
+                        } else {
+                            alert((resp && resp.data) || 'Error adding product');
+                            cancel();
+                        }
+                    });
+                }
+
+                $input.on('keydown', function(e){
+                    if(e.key === 'Enter'){
+                        e.preventDefault();
+                        save();
+                    } else if(e.key === 'Escape'){
+                        cancel();
+                    }
+                });
+                $input.on('blur', save);
+            } else {
+                console.log('No bin, creating bin + product input fields...');
+                var $binInput = $('<input type="text" class="blm-add-bin" list="blm-bin-options" placeholder="Bin" />');
+                var $idInput  = $('<input type="text" class="blm-add-input" placeholder="Enter SKU or Barcode" />');
+                var $wrap = $('<span class="blm-add-fields"></span>').append($binInput).append($idInput);
+                $btn.replaceWith($wrap);
+                $binInput.focus();
+
+                function cancel(){
+                    $wrap.replaceWith($('<button type="button" class="blm-add-product bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 text-xs font-medium transition" data-bin="">Add Product</button>'));
+                }
+
+                function save(){
+                    var binVal = $binInput.val().trim().toUpperCase();
+                    var identifier = $idInput.val().trim();
+                    console.log('Saving with bin:', binVal, 'identifier:', identifier);
+                    if(!binVal || !identifier){
+                        cancel();
+                        return;
+                    }
+                    $.post(ajaxurl, { action: 'blm_add_product_to_bin', bin: binVal, identifier: identifier }, function(resp){
+                        console.log('AJAX response:', resp);
+                        if(resp && resp.success){
+                            var p = resp.data;
+                            var hasQty = $row.closest('table').find('th').filter(function(){
+                                return $(this).text().trim() === 'Quantity';
+                            }).length > 0;
+                            var $newRow = $(`
+                                <tr data-product-id="${p.ID}" class="border-b border-gray-200 hover:bg-gray-50 transition">
+                                    <td class="p-3 text-center w-10">
+                                        <input type="checkbox" class="blm-select-row rounded-md border-gray-300 focus:ring-2 focus:ring-blue-500" data-product-id="${p.ID}">
+                                    </td>
+                                    <td class="p-3 font-medium text-gray-800 blm-bin-editable" data-product-id="${p.ID}">
+                                        ${p.bin || ''}
+                                    </td>
+                                    <td class="p-3 text-gray-700">${p.sku || ''}</td>
+                                    <td class="p-3 text-gray-700">${p.barcode || ''}</td>
+                                    <td class="p-3 w-2/5 text-gray-800 truncate">${p.name || ''}</td>
+                                    ${hasQty ? '<td class="p-3 text-center"></td>' : ''}
+                                    <td class="p-3 w-32"></td>
+                                    <td class="p-3 w-10 text-center">
+                                        <button type="button"
+                                            class="blm-remove-product bg-red-500 text-white w-7 h-7 rounded-md flex items-center justify-center hover:bg-red-600 transition text-sm font-semibold"
+                                            data-product-id="${p.ID}">
+                                            ×
+                                        </button>
+                                    </td>
+                                </tr>
+                                `);
+
+                            $row.before($newRow);
+                            cancel();
+                        } else {
+                            alert((resp && resp.data) || 'Error adding product');
+                            cancel();
+                        }
+                    });
+                }
+
+                $binInput.on('keydown', function(e){
+                    if(e.key === 'Enter'){
+                        e.preventDefault();
+                        $idInput.focus();
+                    } else if(e.key === 'Escape'){
+                        cancel();
+                    }
+                });
+                $idInput.on('keydown', function(e){
+                    if(e.key === 'Enter'){
+                        e.preventDefault();
+                        save();
+                    } else if(e.key === 'Escape'){
+                        cancel();
+                    }
+                });
+                $idInput.on('blur', save);
+            }
+        });
+
+        // Initialize on page load for any existing tables
+        $('.report-section').each(function() {
+            var $container = $(this);
+            console.log('Checking report section:', $container.attr('id'));
+            if ($container.find('table').length) {
+                console.log('Found table in section, calling enhanceTable');
+                enhanceTable($container);
+            }
+        });
+
+        // Also initialize for any tables already on the page (not in report sections)
+        $('table.bin-report').each(function() {
+            var $table = $(this);
+            var $container = $table.closest('.report-section');
+            if (!$container.length) {
+                $container = $table.parent();
+            }
+            console.log('Found bin-report table, calling enhanceTable');
+            enhanceTable($container);
+        });
+
         $(document).on('click', '.load-report', function(e) {
             e.preventDefault();
 
@@ -373,7 +579,7 @@ jQuery(function($){
                 .html('<p class="text-gray-500">Loading...</p>')
                 .data('action', action);
 
-            $.post(BLML.ajaxurl, { action: action }, function(response) {
+            $.post(ajaxurl, { action: action }, function(response) {
                 $container.html(response);
                 if (typeof enhanceTable === 'function') {
                     enhanceTable($container);

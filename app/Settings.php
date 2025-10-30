@@ -42,7 +42,7 @@ class Settings extends Base {
 			'label'         => __( 'Settings', 'plugin-client' ),
 			'title'         => __( 'Settings', 'plugin-client' ),
 			'header'        => $this->name,
-			'parent'     => 'bin-locations',
+			'parent'     	=> 'bin-locations',
 			// 'priority'   => 10,
 			// 'capability' => 'manage_options',
 			// 'icon'       => 'dashicons-wordpress',

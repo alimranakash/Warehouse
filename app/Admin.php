@@ -54,6 +54,20 @@ class Admin extends Base {
 		if( ! get_option( 'plugin-client_install_time' ) ){
 			update_option( 'plugin-client_install_time', time() );
 		}
+
+		global $wpdb;
+
+		$table_name = $wpdb->prefix . 'bin_locations';
+		$charset_collate = $wpdb->get_charset_collate();
+
+		$sql = "CREATE TABLE $table_name (
+			id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+			name VARCHAR(255) NOT NULL,
+			PRIMARY KEY (id)
+		) $charset_collate;";
+
+		require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
+		dbDelta( $sql );
 	}
 
 	/**
@@ -61,19 +75,22 @@ class Admin extends Base {
 	 */
 	public function enqueue_scripts( $hook ) {
 		$min = defined( 'BLM_DEBUG' ) && BLM_DEBUG ? '' : '.min';
-		
+
 		wp_enqueue_style( $this->slug, plugins_url( "/assets/css/admin{$min}.css", BLM ), '', time(), 'all' );
 
-		if ( $hook == 'toplevel_page_bin-locations' ) {
+		if ( $hook == 'toplevel_page_bin-locations' || $hook == 'bin-locations_page_bin-locations-locations' ) {
 			wp_enqueue_script( 'tailwindcss', 'https://cdn.tailwindcss.com', [ 'jquery' ], time(), false );
 			wp_enqueue_script( $this->slug . '-scanner', plugins_url( "/assets/js/scanner{$min}.js", BLM ), [ 'jquery' ], time(), true );
 			wp_enqueue_script( $this->slug . '-locations', plugins_url( "/assets/js/locations{$min}.js", BLM ), [ 'jquery' ], time(), true );
-			
+
 			$localized = [
 				'ajaxurl'	=> admin_url( 'admin-ajax.php' ),
 				'_wpnonce'	=> wp_create_nonce(),
 			];
 			wp_localize_script( $this->slug . '-locations', 'BLML', apply_filters( "{$this->slug}-localized", $localized ) );
+
+			// Add global ajaxurl for compatibility
+			wp_add_inline_script( $this->slug . '-locations', 'var ajaxurl = "' . admin_url( 'admin-ajax.php' ) . '";', 'before' );
 	    }
 
 		wp_enqueue_script( $this->slug, plugins_url( "/assets/js/admin{$min}.js", BLM ), [ 'jquery' ], time(), true );
@@ -149,7 +166,78 @@ class Admin extends Base {
 
 	    $table = $wpdb->prefix . 'bin_locations';
 
-	    // (same PHP logic for CRUD as before...)
+	    // Handle Add New Location
+	    if (isset($_POST['new_location']) && !empty($_POST['new_location'])) {
+	        // Verify nonce
+	        if (!isset($_POST['blm_add_location_nonce']) || !wp_verify_nonce($_POST['blm_add_location_nonce'], 'blm_add_location')) {
+	            echo '<div class="notice notice-error is-dismissible"><p>Security check failed!</p></div>';
+	        } else {
+	            $new_location = strtoupper(sanitize_text_field($_POST['new_location']));
+
+	            // Check if location already exists
+	            $exists = $wpdb->get_var($wpdb->prepare(
+	                "SELECT COUNT(*) FROM $table WHERE UPPER(name) = %s",
+	                $new_location
+	            ));
+
+	            if ($exists) {
+	                echo '<div class="notice notice-error is-dismissible"><p>Location already exists!</p></div>';
+	            } else {
+	                $wpdb->insert($table, ['name' => $new_location]);
+	                echo '<div class="notice notice-success is-dismissible"><p>Location added successfully!</p></div>';
+	            }
+	        }
+	    }
+
+	    // Handle Edit Location
+	    if (isset($_POST['edit_id']) && isset($_POST['edit_location'])) {
+	        // Verify nonce
+	        if (!isset($_POST['blm_edit_location_nonce']) || !wp_verify_nonce($_POST['blm_edit_location_nonce'], 'blm_edit_location')) {
+	            echo '<div class="notice notice-error is-dismissible"><p>Security check failed!</p></div>';
+	        } else {
+	            $edit_id = intval($_POST['edit_id']);
+	            $edit_location = strtoupper(sanitize_text_field($_POST['edit_location']));
+
+	            $wpdb->update($table, ['name' => $edit_location], ['id' => $edit_id]);
+	            echo '<div class="notice notice-success is-dismissible"><p>Location updated successfully!</p></div>';
+	        }
+	    }
+
+	    // Handle Delete Single Location
+	    if (isset($_GET['delete']) && isset($_GET['_wpnonce'])) {
+	        // Verify nonce
+	        if (!wp_verify_nonce($_GET['_wpnonce'], 'blm_delete_location')) {
+	            echo '<div class="notice notice-error is-dismissible"><p>Security check failed!</p></div>';
+	        } else {
+	            $delete_id = intval($_GET['delete']);
+	            $wpdb->delete($table, ['id' => $delete_id]);
+	            echo '<div class="notice notice-success is-dismissible"><p>Location deleted successfully!</p></div>';
+	        }
+	    }
+
+	    // Handle Bulk Delete
+	    if (isset($_POST['bulk_delete']) && isset($_POST['location_ids'])) {
+	        // Verify nonce
+	        if (!isset($_POST['blm_bulk_delete_nonce']) || !wp_verify_nonce($_POST['blm_bulk_delete_nonce'], 'blm_bulk_delete')) {
+	            echo '<div class="notice notice-error is-dismissible"><p>Security check failed!</p></div>';
+	        } else {
+	            $ids = array_map('intval', $_POST['location_ids']);
+	            $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+	            $wpdb->query($wpdb->prepare("DELETE FROM $table WHERE id IN ($placeholders)", $ids));
+	            echo '<div class="notice notice-success is-dismissible"><p>Selected locations deleted successfully!</p></div>';
+	        }
+	    }
+
+	    // Handle Delete All
+	    if (isset($_POST['delete_all'])) {
+	        // Verify nonce
+	        if (!isset($_POST['blm_delete_all_nonce']) || !wp_verify_nonce($_POST['blm_delete_all_nonce'], 'blm_delete_all')) {
+	            echo '<div class="notice notice-error is-dismissible"><p>Security check failed!</p></div>';
+	        } else {
+	            $wpdb->query("TRUNCATE TABLE $table");
+	            echo '<div class="notice notice-success is-dismissible"><p>All locations deleted successfully!</p></div>';
+	        }
+	    }
 
 	    $locations = $wpdb->get_results("SELECT * FROM $table ORDER BY name ASC");
 	    ?>
@@ -157,11 +245,14 @@ class Admin extends Base {
 	        <h1 class="text-3xl font-bold mb-6 text-gray-800">🏷️ Manage Bin Locations</h1>
 
 	        <form method="post" class="mb-6 flex gap-3">
+	            <?php wp_nonce_field('blm_add_location', 'blm_add_location_nonce'); ?>
 	            <input type="text" name="new_location" placeholder="Add new location" required class="border rounded-lg px-4 py-2 w-1/3 focus:ring-2 focus:ring-blue-500">
 	            <button class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2 rounded-lg transition">Add</button>
 	        </form>
 
 	        <form method="post" onsubmit="return confirm('Are you sure you want to delete the selected locations?');" class="bg-white shadow-md rounded-xl p-6">
+	            <?php wp_nonce_field('blm_bulk_delete', 'blm_bulk_delete_nonce'); ?>
+	            <?php wp_nonce_field('blm_delete_all', 'blm_delete_all_nonce'); ?>
 	            <table class="min-w-full border border-gray-200 divide-y divide-gray-200">
 	                <thead class="bg-gray-50">
 	                    <tr>
@@ -177,11 +268,12 @@ class Admin extends Base {
 	                        <td class="px-4 py-2 font-medium text-gray-700"><?php echo esc_html($loc->name); ?></td>
 	                        <td class="px-4 py-2 flex gap-2">
 	                            <form method="post" class="flex gap-2">
+	                                <?php wp_nonce_field('blm_edit_location', 'blm_edit_location_nonce'); ?>
 	                                <input type="hidden" name="edit_id" value="<?php echo $loc->id; ?>">
 	                                <input type="text" name="edit_location" value="<?php echo esc_attr($loc->name); ?>" required class="border rounded px-2 py-1">
 	                                <button class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded">Update</button>
 	                            </form>
-	                            <a href="?page=bin-locations-locations&delete=<?php echo $loc->id; ?>" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded" onclick="return confirm('Delete this location?');">Delete</a>
+	                            <a href="?page=bin-locations-locations&delete=<?php echo $loc->id; ?>&_wpnonce=<?php echo wp_create_nonce('blm_delete_location'); ?>" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded" onclick="return confirm('Delete this location?');">Delete</a>
 	                        </td>
 	                    </tr>
 	                    <?php endforeach; ?>

@@ -49,21 +49,42 @@ class Common extends Base {
 	}
 
 	public function product_meta( $post_id ) {
-		if (!isset($_POST['bin_location'])) {
+		// Check if nonce is set and valid
+		if (!isset($_POST['woocommerce_meta_nonce']) || !wp_verify_nonce($_POST['woocommerce_meta_nonce'], 'woocommerce_save_data')) {
 	        return;
 	    }
+
+	    // Check if this is an autosave
+	    if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
+	        return;
+	    }
+
+	    // Check user permissions
+	    if (!current_user_can('edit_post', $post_id)) {
+	        return;
+	    }
+
+	    if (!isset($_POST['bin_location'])) {
+	        return;
+	    }
+
 	    $location = strtoupper(sanitize_text_field($_POST['bin_location']));
 	    if ($location === '') {
 	        delete_post_meta($post_id, 'bin_location');
 	        return;
 	    }
-	    if (bin_locations_exists($location)) {
-	        update_post_meta($post_id, 'bin_location', $location);
-	    } else {
-	        if (class_exists('WC_Admin_Meta_Boxes')) {
-	            WC_Admin_Meta_Boxes::add_error('Invalid bin location');
+
+	    // Check if validation is enabled (you can add a setting for this)
+	    $validate_bin = apply_filters('warehouse_validate_bin_location', true);
+
+	    if ($validate_bin && !bin_locations_exists($location)) {
+	        if (class_exists('\WC_Admin_Meta_Boxes')) {
+	            \WC_Admin_Meta_Boxes::add_error('Invalid bin location: ' . $location . '. Please add it to Bin Locations first.');
 	        }
+	        return;
 	    }
+
+	    update_post_meta($post_id, 'bin_location', $location);
 	}
 
 	public function variation_fields( $loop, $variation_data, $variation ) {
@@ -84,20 +105,31 @@ class Common extends Base {
 	}
 
 	public function save_product_variation( $variation_id, $i ) {
-		if (!isset($_POST['bin_location'][$i])) {
+		// Check if nonce is set and valid
+		if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'save-variations')) {
 	        return;
 	    }
+
+	    if (!isset($_POST['bin_location'][$i])) {
+	        return;
+	    }
+
 	    $location = strtoupper(sanitize_text_field($_POST['bin_location'][$i]));
 	    if ($location === '') {
 	        delete_post_meta($variation_id, 'bin_location');
 	        return;
 	    }
-	    if (bin_locations_exists($location)) {
-	        update_post_meta($variation_id, 'bin_location', $location);
-	    } else {
-	        if (class_exists('WC_Admin_Meta_Boxes')) {
-	            WC_Admin_Meta_Boxes::add_error('Invalid bin location');
+
+	    // Check if validation is enabled (you can add a setting for this)
+	    $validate_bin = apply_filters('warehouse_validate_bin_location', true);
+
+	    if ($validate_bin && !bin_locations_exists($location)) {
+	        if (class_exists('\WC_Admin_Meta_Boxes')) {
+	            \WC_Admin_Meta_Boxes::add_error('Invalid bin location: ' . $location . '. Please add it to Bin Locations first.');
 	        }
+	        return;
 	    }
+
+	    update_post_meta($variation_id, 'bin_location', $location);
 	}
 }
