@@ -5,7 +5,7 @@
  * Plugin URI:  https://worzen.com/products/
  * Author:      Al Imran Akash
  * Author URI:  https://profiles.wordpress.org/al-imran-akash/
- * Version: 0.9
+ * Version: 	1.0.0
  * Text Domain: warehouse
  * Domain Path: /languages
  */
